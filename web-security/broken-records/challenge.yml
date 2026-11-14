@@ -1,0 +1,11 @@
+name: Broken Records
+allow_privileged: false
+interfaces:
+  - name: Web
+    port: 5000
+  - name: Terminal
+    port: 7681
+  - name: Desktop
+    port: 6080
+  - name: Code
+    port: 8080

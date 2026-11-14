@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+# Start the Broken Records web application in background
+/usr/local/bin/python3 /challenge/server.py > /tmp/broken-records.log 2>&1 &
+SERVER_PID=$!
+
+# Wait for server to bind and respond on port 5000
+for i in $(seq 1 30); do
+    if /usr/local/bin/python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/login')" > /dev/null 2>&1; then
+        echo "Broken Records server is ready on port 5000 (PID: $SERVER_PID)"
+        exit 0
+    fi
+    sleep 0.5
+done
+
+echo "Error: Broken Records server failed to start within timeout" >&2
+cat /tmp/broken-records.log >&2
+exit 1
