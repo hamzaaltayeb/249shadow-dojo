@@ -1,0 +1,6 @@
+name: Cryptography
+challenges:
+  - id: hex-base64
+    name: Hex + Base64
+  - id: caesar-base64
+    name: Caesar + Base64

@@ -1,0 +1,8 @@
+# Organizer solutions and keys (MUST NEVER BE PUBLISHED)
+organizer-solutions/
+
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/

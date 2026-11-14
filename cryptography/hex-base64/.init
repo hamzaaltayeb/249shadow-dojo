@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""
+249shadow Cyber Lab — Cryptography Testing Challenge 1
+Hex + Base64 Dynamic Challenge Initializer
+"""
+
+import base64
+import os
+import pathlib
+import re
+import sys
+
+
+def load_challenge_flag() -> str:
+    """
+    Read the dynamically provisioned instance flag from /flag.
+    If running outside the DOJO container environment (e.g. local unit tests),
+    fall back to a designated development flag.
+    """
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+            raw_flag = ""
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "249shadow{hex_base64_layer_decoded_success_9182}")
+
+    # Normalize flag format to 249shadow{...}
+    m = re.match(r"^pwn\.college\{(.+)\}$", raw_flag)
+    if m:
+        return f"249shadow{{{m.group(1)}}}"
+    elif raw_flag.startswith("249shadow{"):
+        return raw_flag
+    else:
+        return f"249shadow{{{raw_flag}}}"
+
+
+def main():
+    flag = load_challenge_flag()
+
+    # Transformation Layer 1: Encode full flag string using Base64
+    b64_bytes = base64.b64encode(flag.encode("utf-8"))
+    b64_string = b64_bytes.decode("ascii")
+
+    # Transformation Layer 2: Encode the resulting Base64 text as Hexadecimal
+    hex_payload = b64_string.encode("utf-8").hex()
+
+    # Determine destination path
+    challenge_dir = pathlib.Path("/challenge")
+    if challenge_dir.exists():
+        target_path = challenge_dir / "encoded.txt"
+    else:
+        target_path = pathlib.Path(__file__).parent / "encoded.txt"
+
+    # Write the artifact with newline for clean terminal viewing
+    target_path.write_text(hex_payload + "\n", encoding="utf-8")
+    target_path.chmod(0o644)
+
+    # Replicate artifact to /home/hacker if available for participant convenience
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            hacker_artifact = hacker_home / "encoded.txt"
+            hacker_artifact.write_text(hex_payload + "\n", encoding="utf-8")
+            hacker_artifact.chmod(0o644)
+        except Exception:
+            pass
+
+    # When running inside live container, remove .init to avoid exposing generator logic.
+    # Safety guard: Only unlink if running inside the container environment (/run/dojo or /.dockerenv exists)
+    # AND the path is strictly inside /challenge.
+    this_script = pathlib.Path(__file__).resolve()
+    is_in_container = pathlib.Path("/run/dojo").exists() or pathlib.Path("/.dockerenv").exists()
+    if is_in_container and str(this_script).startswith("/challenge"):
+        try:
+            this_script.unlink()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()

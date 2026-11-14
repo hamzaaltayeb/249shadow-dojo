@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+249shadow Cyber Lab — Cryptography Testing Challenge 2
+Caesar + Base64 Dynamic Challenge Initializer
+"""
+
+import base64
+import os
+import pathlib
+import re
+import sys
+
+DEFAULT_SHIFT = 13
+
+
+def load_challenge_flag() -> str:
+    """
+    Read the dynamically provisioned instance flag from /flag.
+    If running outside the DOJO container environment (e.g. local unit tests),
+    fall back to a designated development flag.
+    """
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+            raw_flag = ""
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "249shadow{caesar_classical_cipher_rotation_7241}")
+
+    # Normalize flag format to 249shadow{...}
+    m = re.match(r"^pwn\.college\{(.+)\}$", raw_flag)
+    if m:
+        return f"249shadow{{{m.group(1)}}}"
+    elif raw_flag.startswith("249shadow{"):
+        return raw_flag
+    else:
+        return f"249shadow{{{raw_flag}}}"
+
+
+def caesar_shift_char(ch: str, shift: int) -> str:
+    """Shift a single alphabetic character by `shift` positions, preserving case."""
+    if "a" <= ch <= "z":
+        return chr((ord(ch) - ord("a") + shift) % 26 + ord("a"))
+    elif "A" <= ch <= "Z":
+        return chr((ord(ch) - ord("A") + shift) % 26 + ord("A"))
+    return ch
+
+
+def apply_caesar_to_flag(flag: str, shift: int) -> str:
+    """
+    Applies Caesar substitution to alphabetic characters while strictly preserving:
+    - Digits (0-9)
+    - Braces ({, })
+    - Underscores (_) and other punctuation
+    - The exact '249shadow' prefix
+    """
+    m = re.match(r"^(249shadow\{)(.*)(\})$", flag)
+    if m:
+        prefix, inner, suffix = m.groups()
+        shifted_inner = "".join(caesar_shift_char(c, shift) for c in inner)
+        return f"{prefix}{shifted_inner}{suffix}"
+    else:
+        # Fallback preserving non-alpha characters
+        return "".join(caesar_shift_char(c, shift) for c in flag)
+
+
+def main():
+    shift = int(os.environ.get("CAESAR_SHIFT", str(DEFAULT_SHIFT)))
+    flag = load_challenge_flag()
+
+    # Transformation Layer 1: Caesar substitution on inner alphabetic characters
+    caesar_ciphertext = apply_caesar_to_flag(flag, shift)
+
+    # Transformation Layer 2: Base64 encode the resulting ciphertext string
+    b64_bytes = base64.b64encode(caesar_ciphertext.encode("utf-8"))
+    b64_string = b64_bytes.decode("ascii")
+
+    # Determine destination path
+    challenge_dir = pathlib.Path("/challenge")
+    if challenge_dir.exists():
+        target_path = challenge_dir / "ciphertext.txt"
+    else:
+        target_path = pathlib.Path(__file__).parent / "ciphertext.txt"
+
+    # Write the artifact with newline for clean terminal viewing
+    target_path.write_text(b64_string + "\n", encoding="utf-8")
+    target_path.chmod(0o644)
+
+    # Replicate artifact to /home/hacker if available for participant convenience
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            hacker_artifact = hacker_home / "ciphertext.txt"
+            hacker_artifact.write_text(b64_string + "\n", encoding="utf-8")
+            hacker_artifact.chmod(0o644)
+        except Exception:
+            pass
+
+    # When running inside live container, remove .init to avoid exposing shift/source.
+    # Safety guard: Only unlink if running inside the container environment (/run/dojo or /.dockerenv exists)
+    # AND the path is strictly inside /challenge.
+    this_script = pathlib.Path(__file__).resolve()
+    is_in_container = pathlib.Path("/run/dojo").exists() or pathlib.Path("/.dockerenv").exists()
+    if is_in_container and str(this_script).startswith("/challenge"):
+        try:
+            this_script.unlink()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()
