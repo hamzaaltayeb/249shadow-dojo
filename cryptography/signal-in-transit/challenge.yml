@@ -1,4 +1,5 @@
 name: Signal in Transit
+difficulty: easy
 allow_privileged: false
 interfaces:
   - name: Terminal

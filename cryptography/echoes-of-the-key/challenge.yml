@@ -1,4 +1,5 @@
 name: Echoes of the Key
+difficulty: medium
 allow_privileged: false
 interfaces:
   - name: Terminal

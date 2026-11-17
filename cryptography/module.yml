@@ -2,5 +2,7 @@ name: Cryptography
 challenges:
   - id: signal-in-transit
     name: Signal in Transit
+    difficulty: easy
   - id: echoes-of-the-key
     name: Echoes of the Key
+    difficulty: medium
