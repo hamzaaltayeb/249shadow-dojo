@@ -1,5 +1,4 @@
 name: Cryptography
-permalink: cryptography
 challenges:
   - id: signal-in-transit
     name: Signal in Transit
