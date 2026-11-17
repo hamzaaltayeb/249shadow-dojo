@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""
+249Shadow Cyber Lab — Challenge 02: Echoes of the Key (Medium)
+Official Cryptography Challenge Initializer
+"""
+
+import base64
+import os
+import pathlib
+import re
+import sys
+
+
+def load_runtime_flag() -> tuple[str, str, str]:
+    """
+    Read the instance flag from /flag.
+    Returns (raw_flag, prefix, payload).
+    Never mutates or rewrites the runtime flag silently.
+    """
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "").strip()
+
+    if not raw_flag:
+        # Designated offline test fallback
+        raw_flag = "249shadow{crypto_test_fixture_01}"
+
+    # Extract wrapper prefix and inner payload
+    m = re.match(r"^([^\{]+)\{(.*)\}$", raw_flag)
+    if not m:
+        sys.stderr.write(f"Warning: Flag '{raw_flag}' does not match wrapper format prefix{{payload}}.\n")
+        return raw_flag, "249shadow", raw_flag
+
+    prefix, payload = m.group(1), m.group(2)
+    return raw_flag, prefix, payload
+
+
+def get_cipher_key() -> str:
+    """
+    Construct repeating key dynamically without plaintext literal constant.
+    Corresponds to uppercase ASCII letters: S-H-A-D-O-W (lengths=6).
+    """
+    return bytes([83, 72, 65, 68, 79, 87]).decode("ascii")
+
+
+def vigenere_encrypt(plaintext: str, key: str) -> str:
+    """
+    Encrypts plaintext using Vigenère cipher:
+    - Shifts ASCII alphabetic characters preserving case.
+    - Leaves digits, underscores, and punctuation unchanged.
+    - Advances key index ONLY when an alphabetic character is encrypted.
+    """
+    key_shifts = [ord(k.upper()) - ord("A") for k in key if k.isalpha()]
+    if not key_shifts:
+        return plaintext
+
+    k_len = len(key_shifts)
+    k_idx = 0
+    ciphertext_chars = []
+
+    for ch in plaintext:
+        if "a" <= ch <= "z":
+            shift = key_shifts[k_idx % k_len]
+            ciphertext_chars.append(chr((ord(ch) - ord("a") + shift) % 26 + ord("a")))
+            k_idx += 1
+        elif "A" <= ch <= "Z":
+            shift = key_shifts[k_idx % k_len]
+            ciphertext_chars.append(chr((ord(ch) - ord("A") + shift) % 26 + ord("A")))
+            k_idx += 1
+        else:
+            ciphertext_chars.append(ch)
+
+    return "".join(ciphertext_chars)
+
+
+OPERATOR_NOTE_CONTENT = """[OPERATOR FIELD LOG // STATION 249]
+RECORDING_ID: COMM-SEC-0941
+CLASSIFICATION: RESTRICTED // UNIT-249 FIELD OPERATIONS
+TRANSMISSION STATUS: ROUTED VIA RELAY-7
+
+--- ADVISORY NOTICE ---
+1. All outward telemetry payload transmissions are protected with a two-tier encapsulation protocol.
+2. The outer transport envelope utilizes standard Base64 encoding to prevent character truncation across legacy 7-bit relay nodes.
+3. The inner payload is enciphered via a polyalphabetic substitution stream using our designated unit keyword.
+
+--- OPERATOR KEY DERIVATION CLUE ---
+Per standard unit operational security (OPSEC) rules, the repeating encryption key is never transmitted in plain text.
+Field operators configure a single 6-letter uppercase English codeword derived from tactical doctrine:
+"That which is cast by every light in darkness, faithfully walks beside you under the midday sun, yet disappears the moment all light is extinguished."
+
+--- INSTRUCTIONS FOR RECOVERY ---
+1. Strip the Base64 transport encoding from 'message.b64' to extract the intermediate ciphertext.
+2. Deduce the 6-letter repeating alphabetic key from the tactical riddle above.
+3. Reverse the polyalphabetic shift (only alphabetic letters are shifted; digits and underscores remain stationary).
+4. Reconstruct the complete flag wrapper (249shadow{...}) around the restored payload to claim points.
+"""
+
+
+def main():
+    _, _, payload = load_runtime_flag()
+    key = get_cipher_key()
+
+    # Transformation Layer 1: Vigenère encryption on payload
+    vigenere_ciphertext = vigenere_encrypt(payload, key)
+
+    # Transformation Layer 2: Base64 encode the resulting ciphertext string
+    b64_bytes = base64.b64encode(vigenere_ciphertext.encode("utf-8"))
+    b64_payload = b64_bytes.decode("ascii")
+
+    # Determine destination directory
+    challenge_dir = pathlib.Path("/challenge")
+    if challenge_dir.exists():
+        msg_path = challenge_dir / "message.b64"
+        note_path = challenge_dir / "operator-note.txt"
+    else:
+        msg_path = pathlib.Path(__file__).parent / "message.b64"
+        note_path = pathlib.Path(__file__).parent / "operator-note.txt"
+
+    # Write challenge artifacts
+    msg_path.write_text(b64_payload + "\n", encoding="utf-8")
+    msg_path.chmod(0o644)
+
+    note_path.write_text(OPERATOR_NOTE_CONTENT, encoding="utf-8")
+    note_path.chmod(0o644)
+
+    # Replicate artifacts to /home/hacker for participant convenience
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            hacker_msg = hacker_home / "message.b64"
+            hacker_msg.write_text(b64_payload + "\n", encoding="utf-8")
+            hacker_msg.chmod(0o644)
+
+            hacker_note = hacker_home / "operator-note.txt"
+            hacker_note.write_text(OPERATOR_NOTE_CONTENT, encoding="utf-8")
+            hacker_note.chmod(0o644)
+        except Exception:
+            pass
+
+    # Safety: Remove .init inside container so generator source is not exposed
+    this_script = pathlib.Path(__file__).resolve()
+    is_in_container = pathlib.Path("/run/dojo").exists() or pathlib.Path("/.dockerenv").exists()
+    if is_in_container and str(this_script).startswith("/challenge"):
+        try:
+            this_script.unlink()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()

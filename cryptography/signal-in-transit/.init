@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""
+249Shadow Cyber Lab — Challenge 01: Signal in Transit (Easy)
+Official Cryptography Challenge Initializer
+"""
+
+import base64
+import os
+import pathlib
+import re
+import sys
+
+
+def load_runtime_flag() -> tuple[str, str, str]:
+    """
+    Read the instance flag from /flag.
+    Returns (raw_flag, prefix, payload).
+    Never mutates or rewrites the runtime flag silently.
+    """
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "").strip()
+
+    if not raw_flag:
+        # Designated offline test fallback
+        raw_flag = "249shadow{crypto_test_fixture_01}"
+
+    # Extract wrapper prefix and inner payload
+    m = re.match(r"^([^\{]+)\{(.*)\}$", raw_flag)
+    if not m:
+        sys.stderr.write(f"Warning: Flag '{raw_flag}' does not match wrapper format prefix{{payload}}.\n")
+        return raw_flag, "249shadow", raw_flag
+
+    prefix, payload = m.group(1), m.group(2)
+    return raw_flag, prefix, payload
+
+
+def main():
+    _, _, payload = load_runtime_flag()
+
+    # Transformation Layer 1: Base64 encode the payload bytes
+    b64_bytes = base64.b64encode(payload.encode("utf-8"))
+
+    # Transformation Layer 2: Hexadecimal encode the resulting Base64 bytes
+    hex_payload = b64_bytes.hex()
+
+    # Determine destination directory
+    challenge_dir = pathlib.Path("/challenge")
+    if challenge_dir.exists():
+        target_path = challenge_dir / "transmission.hex"
+    else:
+        target_path = pathlib.Path(__file__).parent / "transmission.hex"
+
+    # Write artifact with standard trailing newline
+    target_path.write_text(hex_payload + "\n", encoding="utf-8")
+    target_path.chmod(0o644)
+
+    # Replicate artifact to /home/hacker for participant convenience
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            hacker_artifact = hacker_home / "transmission.hex"
+            hacker_artifact.write_text(hex_payload + "\n", encoding="utf-8")
+            hacker_artifact.chmod(0o644)
+        except Exception:
+            pass
+
+    # Safety: Remove .init inside container so generator source is not exposed
+    this_script = pathlib.Path(__file__).resolve()
+    is_in_container = pathlib.Path("/run/dojo").exists() or pathlib.Path("/.dockerenv").exists()
+    if is_in_container and str(this_script).startswith("/challenge"):
+        try:
+            this_script.unlink()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()

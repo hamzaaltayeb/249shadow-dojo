@@ -1,6 +1,7 @@
 name: Cryptography
+permalink: cryptography
 challenges:
-  - id: hex-base64
-    name: Hex + Base64
-  - id: caesar-base64
-    name: Caesar + Base64
+  - id: signal-in-transit
+    name: Signal in Transit
+  - id: echoes-of-the-key
+    name: Echoes of the Key

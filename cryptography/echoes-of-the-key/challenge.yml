@@ -1,4 +1,4 @@
-name: Caesar + Base64
+name: Echoes of the Key
 allow_privileged: false
 interfaces:
   - name: Terminal

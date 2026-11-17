@@ -1,27 +1,27 @@
-# 249shadow Cyber Lab — Cryptography Module
+# 249Shadow Cyber Lab — Cryptography Module
 
-Welcome to the **Cryptography** training track of the **249shadow Cyber Lab**.
+Welcome to the **Cryptography** track of the **249Shadow Cyber Lab**.
 
 ## Module Overview
 
-Modern security operations and digital investigations frequently encounter data obfuscated through multi-stage encodings, legacy cryptographic algorithms, and combined transformation schemes. Threat actors and malware authors use these techniques to evade static file signatures, bypass network content inspection filters, and conceal sensitive configuration parameters.
+Practical cryptography challenges focused on encoding, classical ciphers, and layered transformations.
 
-This module introduces core concepts in data representation, classical cryptanalysis, and layered decoding methodologies:
+In real-world security operations and digital forensic investigations, intercepted data and command-and-control communications frequently employ multi-tier encoding and cryptographic transformations. Threat actors often chain representation formats to bypass network intrusion detection systems, evade static signature analysis, or mask operational parameters.
 
-1. **Hexadecimal & Base Representation:** Understanding how raw bytes map to ASCII-safe hexadecimal pairs and binary-to-text representations.
-2. **Base64 Encoding:** Recognizing index table mappings, padding semantics (`=`), and standard 6-bit chunk processing.
-3. **Classical Substitution Ciphers:** Analyzing alphabetic shifts (Caesar / ROT substitution), character frequency, and modular arithmetic operations.
-4. **Encoding vs. Encryption:** Distinguishing between reversible, unkeyed data representation formats (encoding) and mathematically secured transformations requiring key material (encryption).
+This module challenges participants to dissect, analyze, and reverse layered transformation sequences:
 
-## Challenges in this Module
+1. **Layered Data Representation:** Analyzing binary-to-text schemes (Base64) encapsulated within byte-level hexadecimal representations.
+2. **Classical Cipher Analysis:** Reversing polyalphabetic substitution ciphers (Vigenère) using contextual intelligence and repeating key recovery.
+3. **Encoding vs. Encryption:** Distinguishing unkeyed deterministic representation formats from keyed cryptographic algorithms.
 
-- **Hex + Base64 (Beginner):** Investigate an intercepted exfiltration artifact concealed behind two successive encoding layers.
-- **Caesar + Base64 (Beginner–Intermediate):** Analyze a covert communication payload that blends transport-layer Base64 encoding with an inner classical alphabetic rotation cipher.
+## Official Challenge Lineup
 
-## Flag Convention
+- **Signal in Transit (Easy — 50 Points):** Analyze an intercepted communication artifact wrapped in multiple representation layers.
+- **Echoes of the Key (Medium — 100 Points):** Decipher an archived transmission secured by a classical repeating-key cipher and extract the key from operator field logs.
 
-All challenges in this module issue flags following the community standard:
+## Submission Instructions
 
+Each challenge generates challenge artifacts dynamically inside your workspace environment at `/challenge/` (and linked to `/home/hacker/`). 
+
+Submit recovered flags in the standard format:
 `249shadow{...}`
-
-Submit recovered flags directly into the workspace action bar or via `dojo submit` in your terminal.
