@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""
+249Shadow Cyber Lab — Challenge 01: Borrowed Identity (Easy)
+Official Web Security Challenge Initializer
+"""
+
+import os
+import pathlib
+import subprocess
+import sys
+import time
+import urllib.request
+
+
+def load_runtime_flag() -> str:
+    """Read instance flag from /flag without altering contents."""
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "").strip()
+
+    if not raw_flag:
+        raw_flag = "249shadow{websec_test_fixture_01}"
+
+    return raw_flag
+
+
+CASE_FILE_CONTENT = """================================================================================
+249SHADOW CYBER LAB — CASE INVESTIGATION BRIEF
+================================================================================
+TRACK:            Web Security (Access Control Audit)
+TARGET SYSTEM:    Internal Records Archive (Local Port 5000)
+ASSIGNED ANALYST: Operator 249
+STATUS:           AUDIT IN PROGRESS
+--------------------------------------------------------------------------------
+
+MISSION BACKGROUND:
+You have been granted authorized analyst credentials to the internal personnel and
+investigation records portal.
+
+Your task is to conduct an object-level authorization assessment of the record
+viewing interface. Verify whether the application strictly enforces data ownership
+boundaries between personnel.
+
+AUTHORIZED CREDENTIALS:
+  Username: j.morrison
+  Password: Password2026!
+
+LOCAL ACCESS:
+  Portal URL: http://127.0.0.1:5000
+  (Also accessible via the 'Web' workspace tab on port 5000)
+
+INVESTIGATION GUIDELINES:
+1. Authenticate to the portal using your assigned analyst credentials.
+2. Review your assigned records on the analyst dashboard.
+3. Observe how record retrieval requests are structured between the client
+   and the backend API.
+4. Test whether the server verifies object ownership when retrieving records.
+5. Locate the classified operational brief belonging to the Chief Forensic
+   Inspector and retrieve the concealed flag.
+================================================================================
+"""
+
+PORTAL_URL_CONTENT = """http://127.0.0.1:5000
+"""
+
+
+def main():
+    flag = load_runtime_flag()
+
+    # Determine paths
+    challenge_dir = pathlib.Path("/challenge")
+    if not challenge_dir.exists():
+        challenge_dir = pathlib.Path(__file__).parent
+
+    server_script = challenge_dir / "server.py"
+
+    # Set up protected database directory (root-only access)
+    protected_dir = pathlib.Path("/var/lib/249shadow/borrowed-identity")
+    protected_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(str(protected_dir), 0o700)
+    except Exception:
+        pass
+
+    db_path = protected_dir / "records.db"
+
+    # Start the application server in the background
+    cmd = [
+        sys.executable,
+        str(server_script),
+        "--host", "0.0.0.0",
+        "--port", "5000",
+        "--db", str(db_path),
+        "--flag", flag,
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+
+    # Wait for server to bind and respond on port 5000
+    ready = False
+    for _ in range(30):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:5000/healthz", timeout=1.0) as resp:
+                if resp.status == 200:
+                    ready = True
+                    break
+        except Exception:
+            time.sleep(0.3)
+
+    if not ready:
+        sys.stderr.write("Error: Borrowed Identity server failed to initialize within timeout\n")
+        sys.exit(1)
+
+    # Enforce strict database permissions (readable only by root)
+    if db_path.exists():
+        try:
+            os.chmod(str(db_path), 0o600)
+        except Exception:
+            pass
+
+    # Write participant artifacts to challenge directory
+    case_path = challenge_dir / "case-file.txt"
+    case_path.write_text(CASE_FILE_CONTENT, encoding="utf-8")
+    case_path.chmod(0o644)
+
+    url_path = challenge_dir / "portal-url.txt"
+    url_path.write_text(PORTAL_URL_CONTENT, encoding="utf-8")
+    url_path.chmod(0o644)
+
+    # Replicate artifacts to /home/hacker
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            (hacker_home / "case-file.txt").write_text(CASE_FILE_CONTENT, encoding="utf-8")
+            (hacker_home / "case-file.txt").chmod(0o644)
+            (hacker_home / "portal-url.txt").write_text(PORTAL_URL_CONTENT, encoding="utf-8")
+            (hacker_home / "portal-url.txt").chmod(0o644)
+        except Exception:
+            pass
+
+    # Restrict implementation files so participant cannot read server code or .init directly
+    try:
+        server_script.chmod(0o700)
+    except Exception:
+        pass
+
+    this_file = pathlib.Path(__file__)
+    try:
+        this_file.chmod(0o700)
+    except Exception:
+        pass
+
+    print("[+] Borrowed Identity initialized successfully on port 5000")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

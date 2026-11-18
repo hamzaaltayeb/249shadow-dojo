@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""
+249Shadow Cyber Lab — Challenge 02: Query Under Pressure (Medium)
+Official Web Security Challenge Initializer
+"""
+
+import os
+import pathlib
+import subprocess
+import sys
+import time
+import urllib.request
+
+
+def load_runtime_flag() -> str:
+    """Read instance flag from /flag without altering contents."""
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "").strip()
+
+    if not raw_flag:
+        raw_flag = "249shadow{websec_test_fixture_01}"
+
+    return raw_flag
+
+
+INCIDENT_BRIEF_CONTENT = """================================================================================
+249SHADOW CYBER LAB — SECURITY AUDIT INCIDENT BRIEF
+================================================================================
+TRACK:            Web Security (Database & Query Analysis)
+TARGET SERVICE:   Archival Document Search Portal (Local Port 5000)
+ASSIGNED ANALYST: Operator 249
+STATUS:           INVESTIGATION IN PROGRESS
+--------------------------------------------------------------------------------
+
+INCIDENT SUMMARY:
+During an internal application audit, an intelligence document retrieval engine
+was flagged for potential query sanitization flaws.
+
+The application allows employees to query the organization's public documents
+library using free-text keywords (such as 'network', 'telemetry', or 'incident').
+
+Field reports indicate that legacy search routines construct database queries
+dynamically without parameter separation, creating a risk of unauthorized data
+exposure from non-public data structures.
+
+TARGET ACCESS:
+  Search Portal: http://127.0.0.1:5000
+  (Also accessible via the 'Web' workspace tab on port 5000)
+
+KNOWN PUBLIC REFERENCE TERMS:
+  - 'perimeter'
+  - 'incident'
+  - 'cryptographic'
+  - 'telemetry'
+
+INVESTIGATOR OBJECTIVES:
+1. Access the local document search interface.
+2. Test the search parameter for input sanitization and query boundary flaws.
+3. Identify the database engine and determine the column structure returned by
+   the search handler.
+4. Enumerate the database schema to locate restricted archival records.
+5. Extract the classified project record and recover the concealed flag.
+================================================================================
+"""
+
+PORTAL_URL_CONTENT = """http://127.0.0.1:5000
+"""
+
+
+def main():
+    flag = load_runtime_flag()
+
+    # Determine paths
+    challenge_dir = pathlib.Path("/challenge")
+    if not challenge_dir.exists():
+        challenge_dir = pathlib.Path(__file__).parent
+
+    server_script = challenge_dir / "server.py"
+
+    # Set up protected database directory (root-only access)
+    protected_dir = pathlib.Path("/var/lib/249shadow/query-under-pressure")
+    protected_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(str(protected_dir), 0o700)
+    except Exception:
+        pass
+
+    db_path = protected_dir / "documents.db"
+
+    # Start the application server in the background
+    cmd = [
+        sys.executable,
+        str(server_script),
+        "--host", "0.0.0.0",
+        "--port", "5000",
+        "--db", str(db_path),
+        "--flag", flag,
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+
+    # Wait for server to bind and respond on port 5000
+    ready = False
+    for _ in range(30):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:5000/healthz", timeout=1.0) as resp:
+                if resp.status == 200:
+                    ready = True
+                    break
+        except Exception:
+            time.sleep(0.3)
+
+    if not ready:
+        sys.stderr.write("Error: Query Under Pressure server failed to initialize within timeout\n")
+        sys.exit(1)
+
+    # Enforce strict database permissions (readable only by root)
+    if db_path.exists():
+        try:
+            os.chmod(str(db_path), 0o600)
+        except Exception:
+            pass
+
+    # Write participant artifacts to challenge directory
+    brief_path = challenge_dir / "incident-brief.txt"
+    brief_path.write_text(INCIDENT_BRIEF_CONTENT, encoding="utf-8")
+    brief_path.chmod(0o644)
+
+    url_path = challenge_dir / "search-portal.txt"
+    url_path.write_text(PORTAL_URL_CONTENT, encoding="utf-8")
+    url_path.chmod(0o644)
+
+    # Replicate artifacts to /home/hacker
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            (hacker_home / "incident-brief.txt").write_text(INCIDENT_BRIEF_CONTENT, encoding="utf-8")
+            (hacker_home / "incident-brief.txt").chmod(0o644)
+            (hacker_home / "search-portal.txt").write_text(PORTAL_URL_CONTENT, encoding="utf-8")
+            (hacker_home / "search-portal.txt").chmod(0o644)
+        except Exception:
+            pass
+
+    # Restrict implementation files so participant cannot read server code or .init directly
+    try:
+        server_script.chmod(0o700)
+    except Exception:
+        pass
+
+    this_file = pathlib.Path(__file__)
+    try:
+        this_file.chmod(0o700)
+    except Exception:
+        pass
+
+    print("[+] Query Under Pressure initialized successfully on port 5000")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

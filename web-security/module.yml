@@ -1,0 +1,8 @@
+name: Web Security
+challenges:
+  - id: borrowed-identity
+    name: Borrowed Identity
+    difficulty: easy
+  - id: query-under-pressure
+    name: Query Under Pressure
+    difficulty: medium
