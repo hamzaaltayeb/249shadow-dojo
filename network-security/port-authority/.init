@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""
+Port Authority — .init
+Runs as root inside the DOJO challenge container.
+Starts the diagnostic TCP service and writes participant artifacts.
+"""
+
+import hashlib
+import os
+import pathlib
+import socket
+import stat
+import subprocess
+import sys
+import time
+
+CHALLENGE_DIR  = pathlib.Path("/challenge")
+SERVICE_SCRIPT = CHALLENGE_DIR / "service.py"
+DATA_DIR       = pathlib.Path("/var/lib/249shadow/port-authority")
+PORT_FILE      = DATA_DIR / "port.txt"
+HACKER_HOME    = pathlib.Path("/home/hacker")
+
+PORT_RANGE_START = 31000
+PORT_RANGE_SIZE  = 1000
+
+
+# ── flag ─────────────────────────────────────────────────────────────────────
+
+def load_flag() -> str:
+    p = pathlib.Path("/flag")
+    if p.exists():
+        try:
+            return p.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    flag = os.environ.get("FLAG", "").strip()
+    return flag if flag else "249shadow{network_test_fixture_01}"
+
+
+FLAG = load_flag()
+
+def _port_for_flag(flag: str) -> int:
+    digest = int(hashlib.sha256(flag.encode()).hexdigest(), 16)
+    return PORT_RANGE_START + (digest % PORT_RANGE_SIZE)
+
+SERVICE_PORT = _port_for_flag(FLAG)
+
+
+# ── data directory ────────────────────────────────────────────────────────────
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR.chmod(0o700)
+
+PORT_FILE.write_text(str(SERVICE_PORT) + "\n", encoding="utf-8")
+PORT_FILE.chmod(0o600)
+
+
+# ── start service ─────────────────────────────────────────────────────────────
+
+proc = subprocess.Popen(
+    [sys.executable, str(SERVICE_SCRIPT)],
+    env={**os.environ, "FLAG": FLAG},
+    start_new_session=True,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+
+# ── wait for service to listen ────────────────────────────────────────────────
+
+def wait_for_port(host: str, port: int, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect((host, port))
+            s.close()
+            return True
+        except Exception:
+            time.sleep(0.1)
+    return False
+
+
+if not wait_for_port("127.0.0.1", SERVICE_PORT):
+    sys.stderr.write(f"[port-authority] Service failed to start on port {SERVICE_PORT}\n")
+    sys.exit(1)
+
+
+# ── participant artifacts ─────────────────────────────────────────────────────
+
+HACKER_HOME.mkdir(parents=True, exist_ok=True)
+
+(HACKER_HOME / "network-scope.txt").write_text(
+    "=== AUTHORIZED ASSESSMENT SCOPE ===\n"
+    "\n"
+    "Target host  : 127.0.0.1 (loopback only)\n"
+    "Port range   : 31000–31999\n"
+    "Protocol     : TCP\n"
+    "Authorization: Internal red-team assessment #249-NET-07\n"
+    "\n"
+    "Do not scan beyond this range.\n"
+    "Do not interact with services outside this scope.\n",
+    encoding="utf-8",
+)
+
+(HACKER_HOME / "incident-note.txt").write_text(
+    "=== INCIDENT REPORT — DRAFT ===\n"
+    "Reference   : IR-2024-0312\n"
+    "Analyst     : T. Yousif, Net-Ops\n"
+    "Classification: INTERNAL\n"
+    "\n"
+    "During a routine infrastructure audit, an unexpected process was discovered\n"
+    "on a loopback interface of host NODE-7. The process appears to be a legacy\n"
+    "diagnostic shell that was never decommissioned after a hardware migration.\n"
+    "\n"
+    "The service responds to plain-text commands and may expose sensitive\n"
+    "operational data to anyone who connects to it. The exact port was not\n"
+    "recorded in the asset inventory.\n"
+    "\n"
+    "Action required: Identify the port, connect, and document any sensitive\n"
+    "data that the service exposes.\n",
+    encoding="utf-8",
+)
+
+# ── lockdown ──────────────────────────────────────────────────────────────────
+# Prevent hacker user from reading the service source after startup
+
+for restricted in [SERVICE_SCRIPT, CHALLENGE_DIR / ".init"]:
+    try:
+        restricted.chmod(0o700)
+    except Exception:
+        pass
+
+print(f"[port-authority] Service listening on 127.0.0.1:{SERVICE_PORT} — ready.")
+sys.exit(0)

@@ -8,3 +8,4 @@ modules:
   - id: cryptography
   - id: digital-forensics
   - id: web-security
+  - id: network-security

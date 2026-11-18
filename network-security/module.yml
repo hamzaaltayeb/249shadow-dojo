@@ -1,0 +1,8 @@
+name: Network Security
+challenges:
+  - id: port-authority
+    name: Port Authority
+    difficulty: easy
+  - id: trust-boundary
+    name: Trust Boundary
+    difficulty: medium
