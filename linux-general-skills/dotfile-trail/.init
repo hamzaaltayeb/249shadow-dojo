@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""
+Dotfile Trail — .init
+249Shadow CTF · Easy · 50 pts
+
+Initializes the participant workspace with a realistic filesystem hierarchy,
+decoy files, hidden dotfiles, and the target handover artifact containing the dynamic flag.
+"""
+
+import os
+import pathlib
+import stat
+import sys
+
+
+def load_flag() -> str:
+    p = pathlib.Path("/flag")
+    if p.exists():
+        try:
+            return p.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    flag = os.environ.get("FLAG", "").strip()
+    return flag if flag else "249shadow{linux_test_fixture_01}"
+
+
+FLAG = load_flag()
+
+
+def setup_workspace(base_dir: pathlib.Path, flag: str):
+    ws = base_dir / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+
+    # 1. workstation-handover.txt
+    handover_txt = (
+        "=== WORKSTATION HANDOVER BRIEFING ===\n"
+        "Workstation ID: WS-OPS-44\n"
+        "Assigned To   : Operations Team\n"
+        "Transferred By: Tariq M. (Infrastructure Ops)\n"
+        "Handover Date : 2024-11-10\n"
+        "\n"
+        "Notes for the incoming engineer:\n"
+        "Welcome to the team! I have organized my local files under 'workspace/'.\n"
+        "As part of our standard asset decommission procedure, I completed the retirement\n"
+        "checklist for our legacy-sync service.\n"
+        "\n"
+        "The signed handover record and verification token were saved in an uncommitted\n"
+        "configuration dotfile directly within that project's folder.\n"
+        "\n"
+        "Please inspect the directory tree, locate the handover artifact, and record\n"
+        "the verification token in our departmental register.\n"
+        "\n"
+        "Good luck,\n"
+        "Tariq\n"
+    )
+    (base_dir / "workstation-handover.txt").write_text(handover_txt, encoding="utf-8")
+
+    # 2. projects/api-gateway
+    api_dir = ws / "projects" / "api-gateway"
+    api_dir.mkdir(parents=True, exist_ok=True)
+    (api_dir / "server.go").write_text("// API Gateway v1.4\npackage main\n\nfunc main() {}\n", encoding="utf-8")
+    (api_dir / "config.json").write_text('{\n  "port": 8080,\n  "timeout_seconds": 30\n}\n', encoding="utf-8")
+    (api_dir / ".env.example").write_text("API_KEY=example_dev_token\nPORT=8080\nDEBUG=false\n", encoding="utf-8")
+
+    # 3. projects/web-frontend
+    web_dir = ws / "projects" / "web-frontend"
+    web_dir.mkdir(parents=True, exist_ok=True)
+    (web_dir / "index.html").write_text("<!DOCTYPE html><html><body><h1>Internal Portal</h1></body></html>\n", encoding="utf-8")
+    (web_dir / "styles.css").write_text("body { font-family: sans-serif; }\n", encoding="utf-8")
+    (web_dir / ".editorconfig").write_text("root = true\n\n[*]\nindent_style = space\nindent_size = 2\n", encoding="utf-8")
+
+    # 4. projects/data-pipeline
+    pipe_dir = ws / "projects" / "data-pipeline"
+    cache_dir = pipe_dir / ".build_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (pipe_dir / "pipeline.sh").write_text("#!/bin/bash\necho 'Running data pipeline...'\n", encoding="utf-8")
+    (cache_dir / ".cache_id").write_text("build_id=892348\ncreated_epoch=1731234500\n", encoding="utf-8")
+
+    # 5. projects/legacy-sync (TARGET DIRECTORY)
+    sync_dir = ws / "projects" / "legacy-sync"
+    sync_dir.mkdir(parents=True, exist_ok=True)
+    (sync_dir / "README.md").write_text("# Legacy Sync Worker\nStatus: DECOMMISSIONED\nReplaced by modern Kafka pipeline.\n", encoding="utf-8")
+    (sync_dir / "sync_worker.py").write_text("#!/usr/bin/env python3\n# Deprecated sync worker\npass\n", encoding="utf-8")
+    (sync_dir / "config.ini").write_text("[sync]\ninterval = 300\nenabled = false\n", encoding="utf-8")
+    (sync_dir / ".gitkeep").write_text("", encoding="utf-8")
+
+    # TARGET ARTIFACT
+    handover_artifact = (
+        "=== LEGACY-SYNC DECOMMISSION SIGNOFF ===\n"
+        "Workstation: WS-OPS-44\n"
+        "Project: legacy-sync\n"
+        "Status: RETIRED\n"
+        "Date: 2024-11-10\n"
+        "Lead Engineer: Tariq M.\n"
+        "\n"
+        "Verification Token:\n"
+        f"{flag}\n"
+        "\n"
+        "All local databases flushed and synced to cold storage.\n"
+        "=========================================\n"
+    )
+    (sync_dir / ".handover_token").write_text(handover_artifact, encoding="utf-8")
+
+    # 6. logs
+    logs_dir = ws / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "daily_sync.log").write_text("[2024-11-09 00:00:01] Daily sync started\n[2024-11-09 00:00:15] Completed.\n", encoding="utf-8")
+    (logs_dir / "error.log").write_text("[2024-11-08 14:22:01] WARN: Connection timed out, retry succeeded.\n", encoding="utf-8")
+    (logs_dir / ".last_rotation").write_text("timestamp=1731196800\nrotated_files=4\n", encoding="utf-8")
+
+    # 7. config
+    cfg_dir = ws / "config"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "hosts.allow").write_text("# Local access control\nALL: 127.0.0.1\n", encoding="utf-8")
+    (cfg_dir / "network.cfg").write_text("interface = eth0\nmtu = 1500\n", encoding="utf-8")
+    (cfg_dir / ".bashrc_backup").write_text("# .bashrc backup\nexport PATH=$PATH:$HOME/.local/bin\n", encoding="utf-8")
+
+    # 8. archive
+    arch_dir = ws / "archive"
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    (arch_dir / "notes-2023.txt").write_text("General operations notes from 2023.\nAll resolved.\n", encoding="utf-8")
+    (arch_dir / "backup-checklist.txt").write_text("1. Verify checksum\n2. Push to offsite\n3. Notify lead\n", encoding="utf-8")
+    (arch_dir / ".stash_meta").write_text("version=1.0.4\nstash_ref=refs/stash@{0}\n", encoding="utf-8")
+
+    # Ensure all files and directories under base_dir are world-readable and traversable
+    for p in base_dir.rglob("*"):
+        try:
+            if p.is_dir():
+                p.chmod(0o755)
+            else:
+                p.chmod(0o644)
+        except Exception:
+            pass
+
+
+def main():
+    # Setup in /home/hacker (primary participant workspace)
+    hacker_home = pathlib.Path("/home/hacker")
+    if not hacker_home.exists():
+        hacker_home.mkdir(parents=True, exist_ok=True)
+    setup_workspace(hacker_home, FLAG)
+
+    # Also mirror into current working directory if different
+    cwd = pathlib.Path.cwd()
+    if cwd != hacker_home and cwd != pathlib.Path("/"):
+        try:
+            setup_workspace(cwd, FLAG)
+        except Exception:
+            pass
+
+    # Restrict .init from being read by non-root
+    try:
+        pathlib.Path(__file__).chmod(0o700)
+    except Exception:
+        pass
+
+    print("[dotfile-trail] Workspace initialized successfully.")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

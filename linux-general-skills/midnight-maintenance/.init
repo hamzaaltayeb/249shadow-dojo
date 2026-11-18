@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""
+Midnight Maintenance — .init
+249Shadow CTF · Medium · 100 pts
+
+Initializes the participant workspace with a synthetic Linux server snapshot,
+including cron configurations, shell scripts, execution logs, and compressed
+audit reports containing the dynamic flag.
+"""
+
+import gzip
+import os
+import pathlib
+import stat
+import sys
+
+
+def load_flag() -> str:
+    p = pathlib.Path("/flag")
+    if p.exists():
+        try:
+            return p.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    flag = os.environ.get("FLAG", "").strip()
+    return flag if flag else "249shadow{linux_test_fixture_01}"
+
+
+FLAG = load_flag()
+
+
+def setup_snapshot(base_dir: pathlib.Path, flag: str):
+    snap = base_dir / "server-snapshot"
+    snap.mkdir(parents=True, exist_ok=True)
+
+    # 1. incident-report.txt
+    incident_txt = (
+        "=== INCIDENT ANALYSIS REPORT: INC-2024-1115 ===\n"
+        "Incident ID : INC-2024-1115\n"
+        "Severity    : MEDIUM\n"
+        "Target Host : srv-core-02.internal\n"
+        "Incident Date: 2024-11-15\n"
+        "Time Window : 03:00 - 04:00 UTC\n"
+        "Reported By : SOC Monitoring / On-Call Operations\n"
+        "\n"
+        "Executive Summary:\n"
+        "During the early morning hours of November 15, automated monitoring alerts\n"
+        "detected unexpected high disk I/O and process activity on production host\n"
+        "srv-core-02. Preliminary triage showed an administrative maintenance procedure\n"
+        "executed during normal weekday operations, violating the standard policy that\n"
+        "restricts all server maintenance to authorized Sunday 01:00 UTC change windows.\n"
+        "\n"
+        "Scope & Preservation:\n"
+        "Before scheduling the node for decommissioning and clean rebuilding, the incident\n"
+        "response team preserved a forensic snapshot under 'server-snapshot/'.\n"
+        "\n"
+        "Investigative Objectives:\n"
+        "1. Inspect scheduled cron tasks under 'etc/' to identify the misconfigured entry\n"
+        "   that triggered during the weekday 03:00-04:00 UTC window.\n"
+        "2. Correlate cron execution records in 'var/log/cron.log' with maintenance logs\n"
+        "   in 'var/log/maintenance/' to identify the specific execution Run ID.\n"
+        "3. Review the associated shell script under 'usr/local/sbin/' to identify how\n"
+        "   audit reports are produced and stored.\n"
+        "4. Locate the corresponding maintenance execution report and recover the diagnostic\n"
+        "   validation token (flag) emitted by the system during the run.\n"
+        "\n"
+        "Status: Forensic snapshot ready for analysis.\n"
+    )
+    (base_dir / "incident-report.txt").write_text(incident_txt, encoding="utf-8")
+
+    # 2. etc/crontab
+    etc_dir = snap / "etc"
+    etc_dir.mkdir(parents=True, exist_ok=True)
+    crontab_txt = (
+        "SHELL=/bin/bash\n"
+        "PATH=/sbin:/bin:/usr/sbin:/usr/bin\n"
+        "MAILTO=root\n"
+        "\n"
+        "# m h dom mon dow user  command\n"
+        "17 * * * * root    cd / && run-parts --report /etc/cron.hourly\n"
+        "25 6 * * * root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )\n"
+        "47 6 * * 7 root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )\n"
+        "52 6 1 * * root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )\n"
+    )
+    (etc_dir / "crontab").write_text(crontab_txt, encoding="utf-8")
+
+    # 3. etc/cron.d/
+    cron_d = etc_dir / "cron.d"
+    cron_d.mkdir(parents=True, exist_ok=True)
+
+    (cron_d / "0hourly").write_text("# Run hourly jobs\n01 * * * * root run-parts /etc/cron.hourly\n", encoding="utf-8")
+    (cron_d / "backup-sync").write_text(
+        "# Daily incremental backup\n"
+        "30 01 * * * backup-svc /usr/local/sbin/backup-runner.sh --mode=incremental >> /var/log/backup.log 2>&1\n",
+        encoding="utf-8",
+    )
+    (cron_d / "sys-cleanup").write_text(
+        "# Nightly temp cleanup\n"
+        "00 02 * * * root /usr/local/sbin/cleanup.sh --purge-tmp >> /var/log/cleanup.log 2>&1\n",
+        encoding="utf-8",
+    )
+
+    # TARGET CRON FILE: maintenance-tasks (Contains the syntax flaw)
+    maint_tasks_txt = (
+        "# Production Maintenance Schedule\n"
+        "# Reference: Ops Policy Manual SEC-OP-89\n"
+        "\n"
+        "# Task A: Database index optimizer — Sundays at 01:00 UTC\n"
+        "00 01 * * 0 dbadmin /usr/local/sbin/db-optimizer.sh >> /var/log/maintenance/db.log 2>&1\n"
+        "\n"
+        "# Task B: Log rotation service — Daily at 05:00 UTC\n"
+        "00 05 * * * root /usr/sbin/logrotate /etc/logrotate.conf\n"
+        "\n"
+        "# Task C: System Diagnostics & State Maintenance Routine\n"
+        "# NOTE: Supposed to execute monthly on the 1st at 03:20 UTC:\n"
+        "#   20 03 1 * * root /usr/local/sbin/sys-maintenance.sh\n"
+        "# BUG TICKET #4092: Schedule syntax error! '1-5' was entered in weekday field:\n"
+        "20 03 * * 1-5 root /usr/local/sbin/sys-maintenance.sh >> /var/log/maintenance/maintenance.log 2>&1\n"
+    )
+    (cron_d / "maintenance-tasks").write_text(maint_tasks_txt, encoding="utf-8")
+
+    (etc_dir / "environment").write_text('PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"\n', encoding="utf-8")
+
+    # 4. usr/local/sbin/
+    sbin_dir = snap / "usr" / "local" / "sbin"
+    sbin_dir.mkdir(parents=True, exist_ok=True)
+
+    (sbin_dir / "backup-runner.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Backup Runner v1.2\n"
+        "echo \"[$(date -u)] Running incremental backup...\"\n",
+        encoding="utf-8",
+    )
+    (sbin_dir / "cleanup.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Temp Cleanup v2.0\n"
+        "echo \"[$(date -u)] Purging temp directories...\"\n",
+        encoding="utf-8",
+    )
+
+    sys_maint_script = (
+        "#!/usr/bin/env bash\n"
+        "# sys-maintenance.sh — Core Maintenance & Diagnostic Routine\n"
+        "# Operations Suite v3.2 — srv-core-02\n"
+        "\n"
+        "set -euo pipefail\n"
+        "\n"
+        "LOG_FILE=\"/var/log/maintenance/maintenance.log\"\n"
+        "REPORT_DIR=\"/var/log/maintenance/reports\"\n"
+        "\n"
+        "TIMESTAMP=$(date -u +\"%Y-%m-%d %H:%M:%S\")\n"
+        "DATE_STR=$(date -u +\"%Y%m%d\")\n"
+        "PID=$$\n"
+        "RUN_ID=\"MAINT-${DATE_STR}-${PID}\"\n"
+        "\n"
+        "echo \"[$TIMESTAMP] [INFO] Starting maintenance routine run: $RUN_ID\" >> \"$LOG_FILE\"\n"
+        "\n"
+        "mkdir -p \"$REPORT_DIR\"\n"
+        "RAW_REPORT=\"$REPORT_DIR/report-${RUN_ID}.log\"\n"
+        "\n"
+        "# Generate diagnostic summary\n"
+        "cat <<EOF > \"$RAW_REPORT\"\n"
+        "=== SYSTEM MAINTENANCE EXECUTION REPORT ===\n"
+        "Execution ID: $RUN_ID\n"
+        "Timestamp: $TIMESTAMP UTC\n"
+        "Host: srv-core-02\n"
+        "Kernel: Linux 6.1.0-21-amd64\n"
+        "Maintenance Mode: AUTOMATED_DIAGNOSTIC\n"
+        "EOF\n"
+        "\n"
+        "# Compress report to save disk space per retention policy\n"
+        "gzip -f \"$RAW_REPORT\"\n"
+        "echo \"[$TIMESTAMP] [INFO] Maintenance completed for $RUN_ID. Report stored: $RAW_REPORT.gz\" >> \"$LOG_FILE\"\n"
+    )
+    (sbin_dir / "sys-maintenance.sh").write_text(sys_maint_script, encoding="utf-8")
+
+    # 5. var/log/
+    log_dir = snap / "var" / "log"
+    maint_log_dir = log_dir / "maintenance"
+    reports_dir = maint_log_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # cron.log
+    cron_log_txt = (
+        "Nov 13 01:30:01 srv-core-02 CRON[11204]: (backup-svc) CMD (/usr/local/sbin/backup-runner.sh --mode=incremental >> /var/log/backup.log 2>&1)\n"
+        "Nov 13 02:00:01 srv-core-02 CRON[11880]: (root) CMD (/usr/local/sbin/cleanup.sh --purge-tmp >> /var/log/cleanup.log 2>&1)\n"
+        "Nov 13 03:20:01 srv-core-02 CRON[12450]: (root) CMD (/usr/local/sbin/sys-maintenance.sh >> /var/log/maintenance/maintenance.log 2>&1)\n"
+        "Nov 13 05:00:01 srv-core-02 CRON[13100]: (root) CMD (/usr/sbin/logrotate /etc/logrotate.conf)\n"
+        "Nov 14 01:30:01 srv-core-02 CRON[14010]: (backup-svc) CMD (/usr/local/sbin/backup-runner.sh --mode=incremental >> /var/log/backup.log 2>&1)\n"
+        "Nov 14 02:00:01 srv-core-02 CRON[14650]: (root) CMD (/usr/local/sbin/cleanup.sh --purge-tmp >> /var/log/cleanup.log 2>&1)\n"
+        "Nov 14 03:20:01 srv-core-02 CRON[15220]: (root) CMD (/usr/local/sbin/sys-maintenance.sh >> /var/log/maintenance/maintenance.log 2>&1)\n"
+        "Nov 14 05:00:01 srv-core-02 CRON[16000]: (root) CMD (/usr/sbin/logrotate /etc/logrotate.conf)\n"
+        "Nov 15 01:30:01 srv-core-02 CRON[17105]: (backup-svc) CMD (/usr/local/sbin/backup-runner.sh --mode=incremental >> /var/log/backup.log 2>&1)\n"
+        "Nov 15 02:00:01 srv-core-02 CRON[17890]: (root) CMD (/usr/local/sbin/cleanup.sh --purge-tmp >> /var/log/cleanup.log 2>&1)\n"
+        "Nov 15 03:20:01 srv-core-02 CRON[18412]: (root) CMD (/usr/local/sbin/sys-maintenance.sh >> /var/log/maintenance/maintenance.log 2>&1)\n"
+        "Nov 15 05:00:01 srv-core-02 CRON[19200]: (root) CMD (/usr/sbin/logrotate /etc/logrotate.conf)\n"
+    )
+    (log_dir / "cron.log").write_text(cron_log_txt, encoding="utf-8")
+
+    (log_dir / "auth.log").write_text(
+        "Nov 15 00:12:01 srv-core-02 sshd[16800]: Accepted publickey for operator from 10.10.1.25 port 54102 ssh2\n"
+        "Nov 15 03:20:01 srv-core-02 CRON[18412]: pam_unix(cron:session): session opened for user root(uid=0)\n"
+        "Nov 15 03:20:06 srv-core-02 CRON[18412]: pam_unix(cron:session): session closed for user root\n",
+        encoding="utf-8",
+    )
+    (log_dir / "backup.log").write_text("[2024-11-15 01:30:01] Incremental backup completed. 412 MB transferred.\n", encoding="utf-8")
+    (log_dir / "cleanup.log").write_text("[2024-11-15 02:00:01] Purged 18 temp files from /tmp.\n", encoding="utf-8")
+
+    # maintenance.log
+    maint_log_txt = (
+        "[2024-11-13 03:20:01] [INFO] Starting maintenance routine run: MAINT-20241113-8104\n"
+        "[2024-11-13 03:20:05] [INFO] Maintenance completed for MAINT-20241113-8104. Report stored: /var/log/maintenance/reports/report-MAINT-20241113-8104.log.gz\n"
+        "[2024-11-14 03:20:01] [INFO] Starting maintenance routine run: MAINT-20241114-8840\n"
+        "[2024-11-14 03:20:05] [INFO] Maintenance completed for MAINT-20241114-8840. Report stored: /var/log/maintenance/reports/report-MAINT-20241114-8840.log.gz\n"
+        "[2024-11-15 03:20:01] [INFO] Starting maintenance routine run: MAINT-20241115-9421\n"
+        "[2024-11-15 03:20:06] [INFO] Maintenance completed for MAINT-20241115-9421. Report stored: /var/log/maintenance/reports/report-MAINT-20241115-9421.log.gz\n"
+    )
+    (maint_log_dir / "maintenance.log").write_text(maint_log_txt, encoding="utf-8")
+
+    # Decoy report 1
+    rep1_txt = (
+        "=== SYSTEM MAINTENANCE EXECUTION REPORT ===\n"
+        "Execution ID: MAINT-20241113-8104\n"
+        "Timestamp: 2024-11-13 03:20:01 UTC\n"
+        "Host: srv-core-02\n"
+        "Kernel: Linux 6.1.0-21-amd64\n"
+        "Maintenance Mode: AUTOMATED_DIAGNOSTIC\n"
+        "Diagnostic Validation Token: N/A (Routine Cycle)\n"
+        "Integrity Hash: 7b1c4a92e104\n"
+        "Report Status: COMPLETED_NORMAL\n"
+        "===========================================\n"
+    )
+    with gzip.open(reports_dir / "report-MAINT-20241113-8104.log.gz", "wb") as f:
+        f.write(rep1_txt.encode("utf-8"))
+
+    # Decoy report 2
+    rep2_txt = (
+        "=== SYSTEM MAINTENANCE EXECUTION REPORT ===\n"
+        "Execution ID: MAINT-20241114-8840\n"
+        "Timestamp: 2024-11-14 03:20:01 UTC\n"
+        "Host: srv-core-02\n"
+        "Kernel: Linux 6.1.0-21-amd64\n"
+        "Maintenance Mode: AUTOMATED_DIAGNOSTIC\n"
+        "Diagnostic Validation Token: N/A (Routine Cycle)\n"
+        "Integrity Hash: 8c2d5b03f215\n"
+        "Report Status: COMPLETED_NORMAL\n"
+        "===========================================\n"
+    )
+    with gzip.open(reports_dir / "report-MAINT-20241114-8840.log.gz", "wb") as f:
+        f.write(rep2_txt.encode("utf-8"))
+
+    # TARGET REPORT: report-MAINT-20241115-9421.log.gz (Contains FLAG)
+    rep3_txt = (
+        "=== SYSTEM MAINTENANCE EXECUTION REPORT ===\n"
+        "Execution ID: MAINT-20241115-9421\n"
+        "Timestamp: 2024-11-15 03:20:01 UTC\n"
+        "Host: srv-core-02\n"
+        "Kernel: Linux 6.1.0-21-amd64\n"
+        "Maintenance Mode: AUTOMATED_DIAGNOSTIC\n"
+        f"Diagnostic Validation Token: {flag}\n"
+        "Integrity Hash: d41d8cd98f00b204e9800998ecf8427e\n"
+        "Report Status: COMPLETED_WITH_WARNINGS\n"
+        "Note: Execution occurred outside scheduled change window.\n"
+        "===========================================\n"
+    )
+    with gzip.open(reports_dir / "report-MAINT-20241115-9421.log.gz", "wb") as f:
+        f.write(rep3_txt.encode("utf-8"))
+
+    # 6. home/operator/notes.txt
+    home_op = snap / "home" / "operator"
+    home_op.mkdir(parents=True, exist_ok=True)
+    notes_txt = (
+        "Operator Notes — Host srv-core-02:\n"
+        "- Remember to check Ticket #4092: someone reported that sys-maintenance.sh\n"
+        "  has been running on weekdays instead of monthly.\n"
+        "- Investigate cron.d configurations.\n"
+        "- All maintenance reports are archived in /var/log/maintenance/reports/.\n"
+    )
+    (home_op / "notes.txt").write_text(notes_txt, encoding="utf-8")
+
+    # Permissions
+    for p in base_dir.rglob("*"):
+        try:
+            if p.is_dir():
+                p.chmod(0o755)
+            elif p.suffix == ".sh":
+                p.chmod(0o755)
+            else:
+                p.chmod(0o644)
+        except Exception:
+            pass
+
+
+def main():
+    # Setup in /home/hacker (primary participant workspace)
+    hacker_home = pathlib.Path("/home/hacker")
+    if not hacker_home.exists():
+        hacker_home.mkdir(parents=True, exist_ok=True)
+    setup_snapshot(hacker_home, FLAG)
+
+    # Also mirror into current working directory if different
+    cwd = pathlib.Path.cwd()
+    if cwd != hacker_home and cwd != pathlib.Path("/"):
+        try:
+            setup_snapshot(cwd, FLAG)
+        except Exception:
+            pass
+
+    # Restrict .init from being read by non-root
+    try:
+        pathlib.Path(__file__).chmod(0o700)
+    except Exception:
+        pass
+
+    print("[midnight-maintenance] Snapshot initialized successfully.")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

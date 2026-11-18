@@ -1,0 +1,8 @@
+name: Linux & General Skills
+challenges:
+  - id: dotfile-trail
+    name: Dotfile Trail
+    difficulty: easy
+  - id: midnight-maintenance
+    name: Midnight Maintenance
+    difficulty: medium

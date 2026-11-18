@@ -9,3 +9,4 @@ modules:
   - id: digital-forensics
   - id: web-security
   - id: network-security
+  - id: linux-general-skills
