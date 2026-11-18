@@ -6,3 +6,4 @@ award:
 image: pwncollege/challenge-simple
 modules:
   - id: cryptography
+  - id: digital-forensics

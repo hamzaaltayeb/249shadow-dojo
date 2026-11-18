@@ -1,0 +1,10 @@
+name: Silent Exfiltration
+difficulty: medium
+allow_privileged: false
+interfaces:
+  - name: Terminal
+    port: 7681
+  - name: Code
+    port: 8080
+  - name: Desktop
+    port: 6080

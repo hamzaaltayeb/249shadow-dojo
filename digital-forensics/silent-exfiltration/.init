@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""
+249Shadow Cyber Lab — Challenge 02: Silent Exfiltration (Medium)
+Official Digital Forensics Challenge Initializer
+"""
+
+import json
+import os
+import pathlib
+import socket
+import struct
+import sys
+
+
+def load_runtime_flag() -> str:
+    """Read the instance flag from /flag without altering its contents."""
+    flag_path = pathlib.Path("/flag")
+    raw_flag = ""
+    if flag_path.exists():
+        try:
+            raw_flag = flag_path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not read /flag: {e}\n")
+
+    if not raw_flag:
+        raw_flag = os.environ.get("FLAG", "").strip()
+
+    if not raw_flag:
+        raw_flag = "249shadow{forensics_test_fixture_01}"
+
+    return raw_flag
+
+
+def in_cksum(data: bytes) -> int:
+    """RFC 1071 standard Internet Checksum computation."""
+    if len(data) % 2 == 1:
+        data += b"\x00"
+    s = sum(struct.unpack(f"!{len(data)//2}H", data))
+    while s >> 16:
+        s = (s & 0xFFFF) + (s >> 16)
+    return (~s) & 0xFFFF
+
+
+def make_eth(src_mac: bytes, dst_mac: bytes, ethertype: int = 0x0800) -> bytes:
+    return dst_mac + src_mac + struct.pack("!H", ethertype)
+
+
+def make_ipv4(src_ip: str, dst_ip: str, proto: int, payload: bytes, ip_id: int = 1) -> bytes:
+    src_bytes = socket.inet_aton(src_ip)
+    dst_bytes = socket.inet_aton(dst_ip)
+    v_ihl = 0x45
+    total_len = 20 + len(payload)
+    flags_fo = 0x4000  # Don't Fragment
+    ttl = 64
+    hdr = struct.pack("!BBHHHBBH4s4s", v_ihl, 0, total_len, ip_id, flags_fo, ttl, proto, 0, src_bytes, dst_bytes)
+    cksum = in_cksum(hdr)
+    hdr = struct.pack("!BBHHHBBH4s4s", v_ihl, 0, total_len, ip_id, flags_fo, ttl, proto, cksum, src_bytes, dst_bytes)
+    return hdr + payload
+
+
+def make_udp(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payload: bytes) -> bytes:
+    src_bytes = socket.inet_aton(src_ip)
+    dst_bytes = socket.inet_aton(dst_ip)
+    length = 8 + len(payload)
+    udp_hdr = struct.pack("!HHHH", src_port, dst_port, length, 0)
+    pseudo = struct.pack("!4s4sBBH", src_bytes, dst_bytes, 0, 17, length)
+    cksum = in_cksum(pseudo + udp_hdr + payload) or 0xFFFF
+    udp_hdr = struct.pack("!HHHH", src_port, dst_port, length, cksum)
+    return udp_hdr + payload
+
+
+def make_tcp(src_ip: str, dst_ip: str, src_port: int, dst_port: int, seq: int, ack: int, flags: int, payload: bytes = b"", win: int = 64240) -> bytes:
+    src_bytes = socket.inet_aton(src_ip)
+    dst_bytes = socket.inet_aton(dst_ip)
+    data_offset = 5 << 4
+    tcp_hdr = struct.pack("!HHIIBBHHH", src_port, dst_port, seq, ack, data_offset, flags, win, 0, 0)
+    pseudo = struct.pack("!4s4sBBH", src_bytes, dst_bytes, 0, 6, len(tcp_hdr) + len(payload))
+    cksum = in_cksum(pseudo + tcp_hdr + payload) or 0xFFFF
+    tcp_hdr = struct.pack("!HHIIBBHHH", src_port, dst_port, seq, ack, data_offset, flags, win, cksum, 0)
+    return tcp_hdr + payload
+
+
+def encode_dns_name(domain: str) -> bytes:
+    parts = domain.split(".")
+    b = bytearray()
+    for p in parts:
+        b.append(len(p))
+        b.extend(p.encode("ascii"))
+    b.append(0)
+    return bytes(b)
+
+
+def make_dns_query(txid: int, domain: str) -> bytes:
+    header = struct.pack("!HHHHHH", txid, 0x0100, 1, 0, 0, 0)
+    return header + encode_dns_name(domain) + struct.pack("!HH", 1, 1)
+
+
+def make_dns_response(txid: int, domain: str, ip_addr: str) -> bytes:
+    header = struct.pack("!HHHHHH", txid, 0x8180, 1, 1, 0, 0)
+    qname = encode_dns_name(domain)
+    question = qname + struct.pack("!HH", 1, 1)
+    answer = struct.pack("!HHHIH4s", 0xC00C, 1, 1, 300, 4, socket.inet_aton(ip_addr))
+    return header + question + answer
+
+
+class PcapBuilder:
+    def __init__(self, start_time: float = 1731844200.0):
+        self.packets = []
+        self.current_ts = start_time
+
+    def add_packet(self, data: bytes, dt: float = 0.01):
+        self.current_ts += dt
+        sec = int(self.current_ts)
+        usec = int((self.current_ts - sec) * 1_000_000)
+        hdr = struct.pack("<IIII", sec, usec, len(data), len(data))
+        self.packets.append(hdr + data)
+
+    def to_bytes(self) -> bytes:
+        global_hdr = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
+        return global_hdr + b"".join(self.packets)
+
+
+def add_http_get(builder: PcapBuilder, c_ip: str, s_ip: str, c_mac: bytes, s_mac: bytes, c_port: int, s_port: int, host: str, path: str, resp_body: bytes):
+    c_seq, s_seq = 100000 + c_port, 200000 + c_port
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, 0, 0x02))
+    builder.add_packet(p, 0.01)
+    c_seq += 1
+    p = make_eth(s_mac, c_mac) + make_ipv4(s_ip, c_ip, 6, make_tcp(s_ip, c_ip, s_port, c_port, s_seq, c_seq, 0x12))
+    builder.add_packet(p, 0.008)
+    s_seq += 1
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x10))
+    builder.add_packet(p, 0.002)
+
+    req = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64)\r\nAccept: */*\r\n\r\n".encode("utf-8")
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x18, req))
+    builder.add_packet(p, 0.005)
+    c_seq += len(req)
+
+    resp = f"HTTP/1.1 200 OK\r\nServer: nginx/1.24\r\nContent-Type: text/html\r\nContent-Length: {len(resp_body)}\r\n\r\n".encode("utf-8") + resp_body
+    p = make_eth(s_mac, c_mac) + make_ipv4(s_ip, c_ip, 6, make_tcp(s_ip, c_ip, s_port, c_port, s_seq, c_seq, 0x18, resp))
+    builder.add_packet(p, 0.015)
+    s_seq += len(resp)
+
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x11))
+    builder.add_packet(p, 0.003)
+    c_seq += 1
+    p = make_eth(s_mac, c_mac) + make_ipv4(s_ip, c_ip, 6, make_tcp(s_ip, c_ip, s_port, c_port, s_seq, c_seq, 0x11))
+    builder.add_packet(p, 0.003)
+    s_seq += 1
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x10))
+    builder.add_packet(p, 0.002)
+
+
+def add_http_post(builder: PcapBuilder, c_ip: str, s_ip: str, c_mac: bytes, s_mac: bytes, c_port: int, s_port: int, host: str, path: str, headers_extra: str, body: bytes):
+    c_seq, s_seq = 300000 + c_port, 400000 + c_port
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, 0, 0x02))
+    builder.add_packet(p, 0.01)
+    c_seq += 1
+    p = make_eth(s_mac, c_mac) + make_ipv4(s_ip, c_ip, 6, make_tcp(s_ip, c_ip, s_port, c_port, s_seq, c_seq, 0x12))
+    builder.add_packet(p, 0.008)
+    s_seq += 1
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x10))
+    builder.add_packet(p, 0.002)
+
+    # Headers segmentation
+    req_hdrs = f"POST {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64)\r\nContent-Type: application/json\r\n{headers_extra}Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x10, req_hdrs))
+    builder.add_packet(p, 0.005)
+    c_seq += len(req_hdrs)
+
+    # Body packet
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x18, body))
+    builder.add_packet(p, 0.003)
+    c_seq += len(body)
+
+    resp_body = b'{"status":"ok","received":true}'
+    resp = f"HTTP/1.1 200 OK\r\nServer: relay-node/3.1\r\nContent-Type: application/json\r\nContent-Length: {len(resp_body)}\r\n\r\n".encode("utf-8") + resp_body
+    p = make_eth(s_mac, c_mac) + make_ipv4(s_ip, c_ip, 6, make_tcp(s_ip, c_ip, s_port, c_port, s_seq, c_seq, 0x18, resp))
+    builder.add_packet(p, 0.015)
+    s_seq += len(resp)
+
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x11))
+    builder.add_packet(p, 0.003)
+    c_seq += 1
+    p = make_eth(s_mac, c_mac) + make_ipv4(s_ip, c_ip, 6, make_tcp(s_ip, c_ip, s_port, c_port, s_seq, c_seq, 0x11))
+    builder.add_packet(p, 0.003)
+    s_seq += 1
+    p = make_eth(c_mac, s_mac) + make_ipv4(c_ip, s_ip, 6, make_tcp(c_ip, s_ip, c_port, s_port, c_seq, s_seq, 0x10))
+    builder.add_packet(p, 0.002)
+
+
+INCIDENT_BRIEF_TEXT = """================================================================================
+249SHADOW CYBER LAB — NETWORK FORENSICS INCIDENT BRIEF
+================================================================================
+INCIDENT ID:       NET-SEC-2026-1102
+SOURCE HOST:       10.10.42.105 (WKSTN-SEC-OPERATOR)
+GATEWAY:           10.10.42.1
+DNS RESOLVER:      10.10.42.2
+NETWORK CAPTURE:   incident-traffic.pcap
+ANALYST CALLSIGN:  SOC-249 Incident Response Team
+PRIORITY:          HIGH // SUSPECTED OUTBOUND DATA EXFILTRATION
+--------------------------------------------------------------------------------
+
+INCIDENT OVERVIEW:
+A host intrusion detection alert flagged abnormal outbound HTTP transmissions
+originating from workstation 10.10.42.105 during off-peak operations.
+
+Network taps captured an isolated segment of communications containing both
+routine network background traffic (DNS resolutions, internal intranet browsing,
+telemetry heartbeats) and covert multi-part data transmissions.
+
+EVIDENCE ARTIFACT:
+- incident-traffic.pcap (stored in /challenge/ and /home/hacker/)
+
+INVESTIGATOR TASKS:
+1. Inspect 'incident-traffic.pcap' using Wireshark, TShark, or Python.
+2. Analyze DNS queries and identify the suspicious external endpoint.
+3. Isolate the covert HTTP POST streams from benign and decoy traffic.
+4. Extract the transferred fragments sharing the common transfer session ID.
+5. Reassemble the fragments in their correct sequence to reconstruct the flag.
+================================================================================
+"""
+
+
+def main():
+    flag = load_runtime_flag()
+    builder = PcapBuilder(start_time=1731844200.0)
+
+    wkstn_ip = "10.10.42.105"
+    dns_ip = "10.10.42.2"
+    intranet_ip = "10.10.10.25"
+    cdn_ip = "198.51.100.80"
+    suspicious_ip = "203.0.113.195"
+
+    wkstn_mac = b"\x00\x16\x3e\x42\x01\x05"
+    gw_mac = b"\x00\x16\x3e\x42\x00\x01"
+    dns_mac = b"\x00\x16\x3e\x42\x00\x02"
+
+    # 1. DNS: intranet.corp.local
+    q = make_dns_query(0x1A2B, "intranet.corp.local")
+    p = make_eth(wkstn_mac, dns_mac) + make_ipv4(wkstn_ip, dns_ip, 17, make_udp(wkstn_ip, dns_ip, 54120, 53, q))
+    builder.add_packet(p, 0.05)
+    r = make_dns_response(0x1A2B, "intranet.corp.local", intranet_ip)
+    p = make_eth(dns_mac, wkstn_mac) + make_ipv4(dns_ip, wkstn_ip, 17, make_udp(dns_ip, wkstn_ip, 53, 54120, r))
+    builder.add_packet(p, 0.005)
+
+    # 2. Benign HTTP GET
+    add_http_get(builder, wkstn_ip, intranet_ip, wkstn_mac, gw_mac, 54122, 80, "intranet.corp.local", "/portal/index.html", b"<html><body>Intranet Operations Portal</body></html>")
+
+    # 3. DNS: cdn.corp-updates.net
+    q = make_dns_query(0x2B3C, "cdn.corp-updates.net")
+    p = make_eth(wkstn_mac, dns_mac) + make_ipv4(wkstn_ip, dns_ip, 17, make_udp(wkstn_ip, dns_ip, 54124, 53, q))
+    builder.add_packet(p, 0.1)
+    r = make_dns_response(0x2B3C, "cdn.corp-updates.net", cdn_ip)
+    p = make_eth(dns_mac, wkstn_mac) + make_ipv4(dns_ip, wkstn_ip, 17, make_udp(dns_ip, wkstn_ip, 53, 54124, r))
+    builder.add_packet(p, 0.006)
+
+    # 4. Benign HTTP GET: cdn
+    add_http_get(builder, wkstn_ip, cdn_ip, wkstn_mac, gw_mac, 54126, 80, "cdn.corp-updates.net", "/assets/release.json", b'{"release":"2026.11","status":"healthy"}')
+
+    # 5. Decoy HTTP POST
+    decoy_body = b'{"device_id":"WKSTN-42","os":"Linux 6.8.0","status":"idle","metric":"system_ok"}'
+    add_http_post(builder, wkstn_ip, cdn_ip, wkstn_mac, gw_mac, 54128, 80, "cdn.corp-updates.net", "/v1/system/telemetry", "X-Service: metrics\r\n", decoy_body)
+
+    # 6. Suspicious DNS query: sync-telemetry-relay.com
+    q = make_dns_query(0x3C4D, "sync-telemetry-relay.com")
+    p = make_eth(wkstn_mac, dns_mac) + make_ipv4(wkstn_ip, dns_ip, 17, make_udp(wkstn_ip, dns_ip, 54130, 53, q))
+    builder.add_packet(p, 0.15)
+    r = make_dns_response(0x3C4D, "sync-telemetry-relay.com", suspicious_ip)
+    p = make_eth(dns_mac, wkstn_mac) + make_ipv4(dns_ip, wkstn_ip, 17, make_udp(dns_ip, wkstn_ip, 53, 54130, r))
+    builder.add_packet(p, 0.007)
+
+    # 7. Multi-part flag fragmentation (4 fragments)
+    n_fragments = 4
+    part_len = (len(flag) + n_fragments - 1) // n_fragments
+    chunks = [flag[i * part_len : min((i + 1) * part_len, len(flag))] for i in range(n_fragments)]
+
+    transfer_id = "xfer-9482-alpha"
+    transmission_order = [2, 0, 3, 1]
+    client_ports = [54132, 54134, 54136, 54138]
+
+    for step, c_idx in enumerate(transmission_order):
+        port = client_ports[step]
+        seq_num = c_idx + 1
+        body_dict = {
+            "transfer_id": transfer_id,
+            "chunk_index": seq_num,
+            "total_chunks": n_fragments,
+            "payload": chunks[c_idx]
+        }
+        body_json = json.dumps(body_dict).encode("utf-8")
+        headers_extra = f"X-Transfer-ID: {transfer_id}\r\nX-Chunk-Index: {seq_num}\r\nX-Total-Chunks: {n_fragments}\r\n"
+        add_http_post(
+            builder,
+            wkstn_ip,
+            suspicious_ip,
+            wkstn_mac,
+            gw_mac,
+            port,
+            80,
+            "sync-telemetry-relay.com",
+            "/api/collect/stream",
+            headers_extra,
+            body_json
+        )
+
+    pcap_bytes = builder.to_bytes()
+
+    # Determine destination directory
+    challenge_dir = pathlib.Path("/challenge")
+    if challenge_dir.exists():
+        target_dir = challenge_dir
+    else:
+        target_dir = pathlib.Path(__file__).parent
+
+    pcap_path = target_dir / "incident-traffic.pcap"
+    pcap_path.write_bytes(pcap_bytes)
+    pcap_path.chmod(0o644)
+
+    brief_path = target_dir / "incident-brief.txt"
+    brief_path.write_text(INCIDENT_BRIEF_TEXT, encoding="utf-8")
+    brief_path.chmod(0o644)
+
+    # Replicate artifacts to /home/hacker
+    hacker_home = pathlib.Path("/home/hacker")
+    if hacker_home.exists():
+        try:
+            (hacker_home / "incident-traffic.pcap").write_bytes(pcap_bytes)
+            (hacker_home / "incident-traffic.pcap").chmod(0o644)
+            (hacker_home / "incident-brief.txt").write_text(INCIDENT_BRIEF_TEXT, encoding="utf-8")
+            (hacker_home / "incident-brief.txt").chmod(0o644)
+        except Exception:
+            pass
+
+    # Safety: Remove .init inside container so generator source is not exposed
+    this_script = pathlib.Path(__file__).resolve()
+    is_in_container = pathlib.Path("/run/dojo").exists() or pathlib.Path("/.dockerenv").exists()
+    if is_in_container and str(this_script).startswith("/challenge"):
+        try:
+            this_script.unlink()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()

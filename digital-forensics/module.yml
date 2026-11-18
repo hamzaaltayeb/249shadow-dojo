@@ -1,0 +1,8 @@
+name: Digital Forensics
+challenges:
+  - id: hidden-in-plain-sight
+    name: Hidden in Plain Sight
+    difficulty: easy
+  - id: silent-exfiltration
+    name: Silent Exfiltration
+    difficulty: medium
